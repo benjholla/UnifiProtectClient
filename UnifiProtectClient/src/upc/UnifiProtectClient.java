@@ -23,6 +23,7 @@ import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.ssl.SSLContextBuilder;
+import org.apache.http.util.EntityUtils;
 
 public class UnifiProtectClient {
 
@@ -31,17 +32,26 @@ public class UnifiProtectClient {
 	private final String server;
 	private final String username;
 	private final String password;
-	private final boolean verbose;
+	
+	public static enum Verbosity {
+		None, Verbose, VeryVerbose
+	}
+	
+	private final Verbosity verbosity;
 	
 	private CloseableHttpClient httpClient;
 	private BasicCookieStore cookieStore = new BasicCookieStore();
 	
-	public UnifiProtectClient(String server, String username, String password, boolean verbose) throws KeyManagementException, ClientProtocolException, NoSuchAlgorithmException, KeyStoreException, IOException {
+	public UnifiProtectClient(String server, String username, String password, Verbosity verbosity) throws KeyManagementException, ClientProtocolException, NoSuchAlgorithmException, KeyStoreException, IOException {
 		this.server = server;
 		this.username = username;
 		this.password = password;
-		this.verbose = verbose;
+		this.verbosity = verbosity;
 		login();
+	}
+	
+	public void close() throws IOException {
+		httpClient.close();
 	}
 	
 	private void login() throws ClientProtocolException, IOException, KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
@@ -60,10 +70,12 @@ public class UnifiProtectClient {
 				.addParameter("password", password)
 				.build();
 		
+		if(verbosity.ordinal() > 2) System.out.println("Authenticating with user: " + username);
+		
 		HttpResponse loginResponse = httpClient.execute(loginRequest);
 
-//		System.out.println(EntityUtils.toString(loginResponse.getEntity()));
-		if(verbose) System.out.println(loginResponse.getStatusLine());
+//		if(verbosity.ordinal() >= 1) System.out.println("Login: " + loginResponse.getStatusLine());
+		if(verbosity.ordinal() >= 2) System.out.println(EntityUtils.toString(loginResponse.getEntity()));
 		
 		if(loginResponse.getStatusLine().getStatusCode() == 200) {
 			final String TOKEN = "TOKEN";
@@ -93,11 +105,16 @@ public class UnifiProtectClient {
 				.addParameter("end", endTime)
 				.build();
 		
-		if(verbose) System.out.println("Downloading: " + exportRequest);
+		if(verbosity.ordinal() >= 1) System.out.println("Export Video: " + String.format("%s to %s", start, end));
+		if(verbosity.ordinal() >= 2) System.out.println("Downloading: " + exportRequest);
 		
 		HttpResponse exportResponse = httpClient.execute(exportRequest);
 		
-		if(verbose) System.out.println(exportResponse.getStatusLine());
+		if(verbosity.ordinal() >= 1) System.out.println("Export: " + exportResponse.getStatusLine());
+		
+		if(exportResponse.getStatusLine().getStatusCode() != 200) {
+			throw new RuntimeException(String.format("Video segment not available for start %s to end %s on camera %s", start, end, camera));
+		}
 		
 		if(output.getParentFile() != null && !output.getParentFile().exists()) {
 			output.getParentFile().mkdirs();
@@ -118,7 +135,7 @@ public class UnifiProtectClient {
 	}
 	
 	public void downloadSnapshot(String ffmpeg, String camera, Date timestamp, Optional<Long> clockOffset, File output) throws IOException, InterruptedException {
-		File tempFile = File.createTempFile(String.format("%s-%s", camera, Long.toString(timestamp.getTime())), "mp4");
+		File tempFile = File.createTempFile(String.format("%s-%s", camera, Long.toString(timestamp.getTime())), ".mp4");
 		downloadVideo(camera, timestamp, timestamp, clockOffset, tempFile);
 		
 		String[] command = new String[] {
@@ -129,13 +146,16 @@ public class UnifiProtectClient {
 				output.getAbsolutePath()
 		};
 		Process process = Runtime.getRuntime().exec(command);
-		if(verbose) {
+		if(verbosity.ordinal() >= 2) {
 			process.getInputStream().transferTo(System.out);
 			process.getErrorStream().transferTo(System.out);
 		}
 		process.waitFor();
-		
 		tempFile.delete();
+		
+		if(!output.exists()) {
+			throw new RuntimeException(String.format("Snapshot extraction failed for timestamp %s on camera %s", timestamp, camera));
+		}
 	}
 
 }

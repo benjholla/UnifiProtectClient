@@ -14,7 +14,7 @@ public class Example {
 		String username = "PROTECT_USERNAME";
 		String password = "PROTECT_PASSWORD";
 		
-		UnifiProtectClient client = new UnifiProtectClient(server, username, password, true);
+		UnifiProtectClient client = new UnifiProtectClient(server, username, password, UnifiProtectClient.Verbosity.Verbose);
 		
 		// this is a unique id, not the plain camera name
 		// you can find this by browsing the devices and looking at the url
