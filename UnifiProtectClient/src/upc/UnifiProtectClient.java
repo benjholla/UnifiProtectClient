@@ -5,20 +5,13 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.Optional;
 
-import javax.net.ssl.SSLSocketFactory;
-
 import org.apache.http.HttpResponse;
-import org.apache.http.ParseException;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.methods.RequestBuilder;
@@ -30,13 +23,6 @@ import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.ssl.SSLContextBuilder;
-import org.apache.http.util.EntityUtils;
-import org.java_websocket.client.WebSocketClient;
-import org.java_websocket.handshake.ServerHandshake;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-
-import nl.altindag.ssl.SSLFactory;
 
 public class UnifiProtectClient {
 
@@ -45,14 +31,16 @@ public class UnifiProtectClient {
 	private final String server;
 	private final String username;
 	private final String password;
+	private final boolean verbose;
 	
 	private CloseableHttpClient httpClient;
 	private BasicCookieStore cookieStore = new BasicCookieStore();
 	
-	public UnifiProtectClient(String server, String username, String password) throws KeyManagementException, ClientProtocolException, NoSuchAlgorithmException, KeyStoreException, IOException {
+	public UnifiProtectClient(String server, String username, String password, boolean verbose) throws KeyManagementException, ClientProtocolException, NoSuchAlgorithmException, KeyStoreException, IOException {
 		this.server = server;
 		this.username = username;
 		this.password = password;
+		this.verbose = verbose;
 		login();
 	}
 	
@@ -75,7 +63,7 @@ public class UnifiProtectClient {
 		HttpResponse loginResponse = httpClient.execute(loginRequest);
 
 //		System.out.println(EntityUtils.toString(loginResponse.getEntity()));
-//		System.out.println("Login: " + loginResponse.getStatusLine());
+		if(verbose) System.out.println(loginResponse.getStatusLine());
 		
 		if(loginResponse.getStatusLine().getStatusCode() == 200) {
 			final String TOKEN = "TOKEN";
@@ -90,9 +78,13 @@ public class UnifiProtectClient {
 		}
 	}
 	
-	public void downloadVideo(String camera, Date start, Date end, long clockOffset, File output) throws ClientProtocolException, IOException {
-		String startTime = Long.toString(start.getTime() + clockOffset);
-		String endTime = Long.toString(end.getTime() + clockOffset);
+	public void downloadVideo(String camera, Date start, Date end, File output) throws ClientProtocolException, IOException {
+		downloadVideo(camera, start, end, Optional.empty(), output);
+	}
+	
+	public void downloadVideo(String camera, Date start, Date end, Optional<Long> clockOffset, File output) throws ClientProtocolException, IOException {
+		String startTime = clockOffset.isPresent() ? Long.toString(start.getTime() + clockOffset.get()) : Long.toString(start.getTime());
+		String endTime = clockOffset.isPresent() ? Long.toString(end.getTime() + clockOffset.get()) : Long.toString(end.getTime());
 		
 		HttpUriRequest exportRequest = RequestBuilder.get()
 				.setUri(String.format("%s://%s/proxy/protect/api/video/export",  protocol, server))
@@ -101,10 +93,11 @@ public class UnifiProtectClient {
 				.addParameter("end", endTime)
 				.build();
 		
-		System.out.println(exportRequest);
+		if(verbose) System.out.println("Downloading: " + exportRequest);
 		
 		HttpResponse exportResponse = httpClient.execute(exportRequest);
-		System.out.println("Export: " + exportResponse.getStatusLine());
+		
+		if(verbose) System.out.println(exportResponse.getStatusLine());
 		
 		if(output.getParentFile() != null && !output.getParentFile().exists()) {
 			output.getParentFile().mkdirs();
@@ -120,142 +113,29 @@ public class UnifiProtectClient {
 		bos.close();
 	}
 	
-	public void openTimelapseWebSocket(String camera, String timestamp) throws ClientProtocolException, IOException, ParseException, org.json.simple.parser.ParseException, URISyntaxException, InterruptedException {
-		String channel = "0";
-		String format = "FMP4";
-		
-		String start = "0";
-		String end = timestamp;
-
-		HttpUriRequest timelapseRequest = RequestBuilder.get()
-				// TODO: what does this web socket contain?
-				.setUri(String.format("%s://%s/proxy/protect/api/ws/timelapse?camera=%s&channel=%s&format=%s&start=%s&end=%s", protocol, server, camera, channel, format, start, end))
-				.build();
-		
-		HttpResponse timelapseResponse = httpClient.execute(timelapseRequest);
-		
-		System.out.println("Timelapse: " + timelapseResponse.getStatusLine());
-		JSONParser parser = new JSONParser();
-		JSONObject json = (JSONObject) parser.parse(EntityUtils.toString(timelapseResponse.getEntity()));
-		String webSocketUrl = json.get("url").toString();
-		System.out.println("Web Socket: " + webSocketUrl);
-		
-		WebSocketClient socket = new WebSocketClient(new URI(webSocketUrl)) {
-
-			@Override
-			public void onOpen(ServerHandshake handshakedata) {
-				System.out.println("Connected");
-			}
-
-			@Override
-			public void onClose(int code, String reason, boolean remote) {
-				System.out.println("Closed with exit code " + code + " additional info: " + reason);
-			}
-
-			@Override
-			public void onMessage(String message) {
-				System.out.println("Received message: " + message);
-			}
-
-			@Override
-			public void onMessage(ByteBuffer message) {
-				System.out.println("Received ByteBuffer");
-				System.out.println(StandardCharsets.UTF_8.decode(message).toString());
-				
-				// TODO ??? what is client reply???
-				// chrome network ws parser shows non-ascii hex
-				// send("hello");
-			}
-
-			@Override
-			public void onError(Exception ex) {
-				System.err.println("An error occurred:" + ex);
-			}
-
-		};
-			
-		// https://stackoverflow.com/a/67050581/475329
-		SSLFactory sslFactory = SSLFactory.builder()
-		    .withTrustingAllCertificatesWithoutValidation()
-		    .build();
-		SSLSocketFactory sslSocketFactory = sslFactory.getSslSocketFactory();
-			
-		socket.setSocketFactory(sslSocketFactory);
-		
-		socket.connect();
-//		socket.connectBlocking();
+	public void downloadSnapshot(String ffmpeg, String camera, Date timestamp, File output) throws IOException, InterruptedException {
+		downloadSnapshot(ffmpeg, camera, timestamp, Optional.empty(), output);
 	}
 	
-	public void openPlaybackWebSocket(String camera, String timestamp) throws ClientProtocolException, IOException, ParseException, org.json.simple.parser.ParseException, URISyntaxException, InterruptedException {
-		String channel = "0";
-		String format = "FMP4";
+	public void downloadSnapshot(String ffmpeg, String camera, Date timestamp, Optional<Long> clockOffset, File output) throws IOException, InterruptedException {
+		File tempFile = File.createTempFile(String.format("%s-%s", camera, Long.toString(timestamp.getTime())), "mp4");
+		downloadVideo(camera, timestamp, timestamp, clockOffset, tempFile);
 		
-		String start = "0";
-		String end = timestamp;
-
-		HttpUriRequest timelapseRequest = RequestBuilder.get()
-				// TODO: what does this web socket contain?
-				.setUri(String.format("%s://%s/proxy/protect/api/ws/playback?camera=%s&channel=%s&format=%s&start=%s&end=%s", protocol, server, camera, channel, format, start, end))
-				.build();
-		
-		HttpResponse timelapseResponse = httpClient.execute(timelapseRequest);
-		
-		System.out.println("Timelapse: " + timelapseResponse.getStatusLine());
-		JSONParser parser = new JSONParser();
-		JSONObject json = (JSONObject) parser.parse(EntityUtils.toString(timelapseResponse.getEntity()));
-		String webSocketUrl = json.get("url").toString();
-		System.out.println("Web Socket: " + webSocketUrl);
-		
-		WebSocketClient socket = new WebSocketClient(new URI(webSocketUrl)) {
-
-			@Override
-			public void onOpen(ServerHandshake handshakedata) {
-				System.out.println("Connected");
-			}
-
-			@Override
-			public void onClose(int code, String reason, boolean remote) {
-				System.out.println("Closed with exit code " + code + " additional info: " + reason);
-			}
-
-			@Override
-			public void onMessage(String message) {
-				System.out.println("Received message: " + message);
-			}
-
-			@Override
-			public void onMessage(ByteBuffer message) {
-				System.out.println("Received ByteBuffer");
-				System.out.println(StandardCharsets.UTF_8.decode(message).toString());
-				
-				// TODO ??? what is client reply???
-				// chrome network ws parser shows non-ascii hex
-				// send("hello");
-			}
-
-			@Override
-			public void onError(Exception ex) {
-				System.err.println("An error occurred:" + ex);
-			}
-
+		String[] command = new String[] {
+				ffmpeg,
+				"-i",  tempFile.getAbsolutePath(), // specify input file
+				"-vf", "select=eq(n\\,0)", // filter to first frame
+				"-q:v", "1", // quality level 1 (highest) to 31 (lowest)
+				output.getAbsolutePath()
 		};
-			
-		// https://stackoverflow.com/a/67050581/475329
-		SSLFactory sslFactory = SSLFactory.builder()
-		    .withTrustingAllCertificatesWithoutValidation()
-		    .build();
-		SSLSocketFactory sslSocketFactory = sslFactory.getSslSocketFactory();
-			
-		socket.setSocketFactory(sslSocketFactory);
+		Process process = Runtime.getRuntime().exec(command);
+		if(verbose) {
+			process.getInputStream().transferTo(System.out);
+			process.getErrorStream().transferTo(System.out);
+		}
+		process.waitFor();
 		
-		socket.connect();
-//		socket.connectBlocking();
+		tempFile.delete();
 	}
-	
-//	private void download(String url, File output) {
-//		Unirest.config().httpClient(ApacheClient.builder(httpClient));
-//		Unirest.get(url).asFile(output.getAbsolutePath()).getBody();
-//		System.out.println("Downloaded: " + url);
-//	}
 
 }
