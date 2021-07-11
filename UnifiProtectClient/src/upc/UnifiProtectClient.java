@@ -105,12 +105,12 @@ public class UnifiProtectClient {
 				.addParameter("end", endTime)
 				.build();
 		
-		if(verbosity.ordinal() >= 1) System.out.println("Export Video: " + String.format("%s to %s", start, end));
+		if(verbosity.ordinal() >= 1) System.out.println("Export Video: " + String.format("%s to %s for camera %s", start, end, camera));
 		if(verbosity.ordinal() >= 2) System.out.println("Downloading: " + exportRequest);
 		
 		HttpResponse exportResponse = httpClient.execute(exportRequest);
 		
-		if(verbosity.ordinal() >= 1) System.out.println("Export: " + exportResponse.getStatusLine());
+		if(verbosity.ordinal() >= 1) System.out.println("Download: " + exportResponse.getStatusLine());
 		
 		if(exportResponse.getStatusLine().getStatusCode() != 200) {
 			throw new RuntimeException(String.format("Video segment not available for start %s to end %s on camera %s", start, end, camera));
