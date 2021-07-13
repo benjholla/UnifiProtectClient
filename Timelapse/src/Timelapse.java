@@ -23,25 +23,27 @@ public class Timelapse {
 		Optional<Long> clockOffset = Optional.of(TimeUnit.MILLISECONDS.convert(5, TimeUnit.SECONDS));
 		DateFormat formatter = new SimpleDateFormat("MM/dd/yy HH:mm:ss a");
 		Date current = new Date();
-		
+
 		List<Camera> cameras = List.of(
-			new Camera("Camera1", "CAMERA1_ID", formatter.parse("4/25/21 8:00:00 AM"), current),
-			new Camera("Camera2", "CAMERA2_ID", formatter.parse("3/16/21 8:00:00 AM"), current)
+			new Camera("Camera1", "camera1_id", formatter.parse("3/16/21 8:00:00 AM"), current),
+			new Camera("Camera2", "camera2_id", formatter.parse("3/18/21 8:00:00 AM"), current)
 		);
 
 		cameras.forEach(camera -> {
 			camera.getDirectory(outputDirectory).mkdirs();
 		});
-		
-		
+
 		UnifiProtectClient client = null;
 		long interval = TimeUnit.MILLISECONDS.convert(1, TimeUnit.MINUTES);
-		Date timestamp = cameras.stream().map(camera -> camera.getStart()).sorted().findFirst().get();
-		while(timestamp.getTime() < current.getTime()) {
+		Date firstTimestamp = cameras.stream().map(camera -> camera.getStart()).sorted().findFirst().get();
+		List<Date> endTimestamps = cameras.stream().map(camera -> camera.getEnd()).sorted().collect(Collectors.toList());
+		Date lastTimestamp = endTimestamps.get(endTimestamps.size() - 1);
+		Date timestamp = firstTimestamp;
+		while(timestamp.getTime() < lastTimestamp.getTime()) {
 			for(Camera camera : cameras) {
 				if(timestamp.getTime() >= camera.getStart().getTime() && timestamp.getTime() <= camera.getEnd().getTime()) {
 					File cameraDirectory = camera.getDirectory(outputDirectory);
-					
+			
 					File snapshot = new File(cameraDirectory.getAbsolutePath() + File.separator + String.format("%s_%s.jpg", camera.getName(), Long.toString(timestamp.getTime())));
 					if(snapshot.exists()) {
 						System.out.println(String.format("Timestamp %s for camera %s already exists", Long.toString(timestamp.getTime()), camera.getName()));
@@ -57,19 +59,19 @@ public class Timelapse {
 							client = null;
 						}
 					}
-					timestamp = new Date(timestamp.getTime() + interval);
 				}
-			};
+			}
+			timestamp = new Date(timestamp.getTime() + interval);
 		}
-		
+
 	}
-	
+
 	private static class Camera {
 		private final String name;
 		private final String id;
 		private final Date start;
 		private final Date end;
-		
+
 		public Camera(String name, String id, Date start, Date end) {
 			this.name = name;
 			this.id = id;
@@ -84,11 +86,11 @@ public class Timelapse {
 		public String getId() {
 			return id;
 		}
-		
+
 		public Date getStart() {
 			return start;
 		}
-		
+
 		public Date getEnd() {
 			return end;
 		}
