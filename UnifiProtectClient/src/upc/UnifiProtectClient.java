@@ -90,22 +90,18 @@ public class UnifiProtectClient {
 		}
 	}
 	
-	public void downloadVideo(String camera, Date start, Date end, File output) throws ClientProtocolException, IOException {
-		downloadVideo(camera, start, end, Optional.empty(), output);
-	}
-	
-	public void downloadVideo(String camera, Date start, Date end, Optional<Long> clockOffset, File output) throws ClientProtocolException, IOException {
-		String startTime = clockOffset.isPresent() ? Long.toString(start.getTime() + clockOffset.get()) : Long.toString(start.getTime());
-		String endTime = clockOffset.isPresent() ? Long.toString(end.getTime() + clockOffset.get()) : Long.toString(end.getTime());
+	public void downloadVideo(Camera camera, Date start, Date end, File output) throws ClientProtocolException, IOException {
+		String startTime = Long.toString(start.getTime() + camera.getClockOffset());
+		String endTime = Long.toString(end.getTime() + camera.getClockOffset());
 		
 		HttpUriRequest exportRequest = RequestBuilder.get()
 				.setUri(String.format("%s://%s/proxy/protect/api/video/export",  protocol, server))
-				.addParameter("camera", camera)
+				.addParameter("camera", camera.getId())
 				.addParameter("start", startTime)
 				.addParameter("end", endTime)
 				.build();
 		
-		if(verbosity.ordinal() >= 1) System.out.println("Export Video: " + String.format("%s to %s for camera %s", start, end, camera));
+		if(verbosity.ordinal() >= 1) System.out.println("Export Video: " + String.format("%s to %s for camera %s", start, end, camera.getName()));
 		if(verbosity.ordinal() >= 2) System.out.println("Downloading: " + exportRequest);
 		
 		HttpResponse exportResponse = httpClient.execute(exportRequest);
@@ -113,7 +109,7 @@ public class UnifiProtectClient {
 		if(verbosity.ordinal() >= 1) System.out.println("Download: " + exportResponse.getStatusLine());
 		
 		if(exportResponse.getStatusLine().getStatusCode() != 200) {
-			throw new RuntimeException(String.format("Video segment not available for start %s to end %s on camera %s", start, end, camera));
+			throw new RuntimeException(String.format("Video segment not available for start %s to end %s on camera %s", start, end, camera.getName()));
 		}
 		
 		if(output.getParentFile() != null && !output.getParentFile().exists()) {
@@ -130,13 +126,9 @@ public class UnifiProtectClient {
 		bos.close();
 	}
 	
-	public void downloadSnapshot(String ffmpeg, String camera, Date timestamp, File output) throws IOException, InterruptedException {
-		downloadSnapshot(ffmpeg, camera, timestamp, Optional.empty(), output);
-	}
-	
-	public void downloadSnapshot(String ffmpeg, String camera, Date timestamp, Optional<Long> clockOffset, File output) throws IOException, InterruptedException {
+	public void downloadSnapshot(String ffmpeg, Camera camera, Date timestamp, File output) throws IOException, InterruptedException {
 		File tempFile = File.createTempFile(String.format("%s-%s", camera, Long.toString(timestamp.getTime())), ".mp4");
-		downloadVideo(camera, timestamp, timestamp, clockOffset, tempFile);
+		downloadVideo(camera, timestamp, timestamp, tempFile);
 		
 		String[] command = new String[] {
 				ffmpeg,
